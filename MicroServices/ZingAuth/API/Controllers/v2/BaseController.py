@@ -1,17 +1,23 @@
-from fastapi import APIRouter, Depends
+from fastapi import Depends
 from mediatr import Mediator
 from zinghr_backend.app.Containers.pydiator import setup_pydiator
 from dependency_injector.wiring import inject
 
-pydiator = setup_pydiator()
+def get_mediator() -> Mediator:
+    """Dependency provider for Mediator"""
+    return setup_pydiator()
 
 class BaseController:
-    """Base controller using FastAPI and mediatr"""
-
-    @inject
-    def __init__(self, mediator: Mediator = Depends(lambda: pydiator)):
-        self._mediator = mediator
+    """Base controller using FastAPI and Mediatr"""
+    
+    
+    
+    def __init__(self):
+        self._mediator = get_mediator()
 
     @property
     def mediator(self) -> Mediator:
+        return self._mediator
+
+    def get_mediatr(self) -> Mediator: 
         return self._mediator

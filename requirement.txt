@@ -5,3 +5,4 @@ pymysql
 python-dotenv
 psycopg2-binary
 pyodbc
+pycryptodome

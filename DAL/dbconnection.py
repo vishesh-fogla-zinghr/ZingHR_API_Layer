@@ -9,7 +9,6 @@ from .DBModel import DbConnectionString
 from datetime import datetime
 
 
-
 class QueryParameters(BaseModel):
         DatabaseName: str
         TransType: str
@@ -19,10 +18,6 @@ class DBConnection(IDBConnection):
     _cnc_encrypted_dbs = {}
     _objcnc_dictionary_connection = {}
     _lock = threading.Lock() 
-        
-    def __init__(self):
-        pass
-        
 
     # def pms_connection_string(self, identity_service) -> str:
     #     """Retrieve the PMS connection string using the identity's subscription name."""
@@ -53,25 +48,34 @@ class DBConnection(IDBConnection):
         driver = os.getenv("MSSQL_DRIVER")
 
         connection_string = f"Driver={driver};Server={hostname};DATABASE={database};UID={user};PWD={password};"
+        print("Got String: " , connection_string)
 
         return connection_string
 
     def add_subscription_to_hash_table(self, subscription_name: str):
         """Adds a subscription to the hash table if not already present."""
         try:
-            subscription_name = subscription_name.strip().lower()
-
+            subscription_name = subscription_name.strip().lower()\
+                
+            print("Database to add:", subscription_name)
+                
             with self._lock:  # Ensure thread-safe dictionary access
                 if subscription_name not in self._cnc_encrypted_dbs:
                     connection_string = self.get_connection(subscription_name)
-
+                    
+                    print("String to add: ", connection_string)
+                    
                     with pyodbc.connect(connection_string) as conn:
                         cursor = conn.cursor()
                         cursor.execute("{CALL [API].[GetAadharValutFlag]}")
                         result = cursor.fetchone()
+                        
+                        print("Sp called aadhar:", result)
 
                         if result and result[0] == "1":
                             self._cnc_encrypted_dbs[subscription_name] = subscription_name  # Equivalent to TryAdd()
+                            
+                        print("Out of add function")
 
         except Exception as e:
             pass  # Silently handling exceptions, just like in C#
@@ -91,13 +95,25 @@ class DBConnection(IDBConnection):
 
         # Create the connection string using the base function
         connection_string = self.base_connection_string(subscription_name)
+        
+        print("ELCM_Commoncore str - :" , connection_string)
+        print(query_params.DatabaseName)
+        print(query_params.TransType)
+
 
         # Execute the query and check the result
         try:
             with pyodbc.connect(connection_string) as conn:
                 cursor = conn.cursor()
-                cursor.execute("{CALL Common_SP_Login (?, ?)}", query_params.DatabaseName, query_params.TransType)
+                # query = "{CALL [dbo].[Common_SP_Login] (?, ?)}", (query_params.DatabaseName, query_params.TransType)
+                # print(query)
+                
+                query = f"EXEC [dbo].[Common_SP_Login] @DatabaseName=elcm_qadb, @TransType=CheckDB"
+                
+                cursor.execute(query)
                 result = cursor.fetchone()
+                
+                print("Getting result", result)
 
                 # If the result is greater than 0, return True
                 return result[0] > 0 if result else False
@@ -154,8 +170,9 @@ class DBConnection(IDBConnection):
                 con_string = f"Server={db_model.server_address};Initial Catalog={subname};{updated_info};"
 
             return con_string
+       
         
-    async def dispose_connection(self, subscriptionName: str):
+    async def dispose_connection(self, con: pyodbc.Connection):
         print()
     
     async def delete_hash_connection(self, subscription_name: str) -> None:
@@ -170,10 +187,10 @@ class DBConnection(IDBConnection):
             except Exception as e:
                 print(f"Error while removing connection: {e}")
                 
-    def get_connection(self) -> str:
-        """Fetches the connection string using the subscription name from the identity service."""
-        subscription_name = self._identity_service.get_identity().subscription_name.lower()
-        return self.connection_string(subscription_name)
+    # def get_connection(self) -> str:
+    #     """Fetches the connection string using the subscription name from the identity service."""
+    #     subscription_name = self._identity_service.get_identity().subscription_name.lower()
+    #     return self.connection_string(subscription_name)
     
     def get_connection(self, subscription_name: str, connection_type: str = "") -> str:
         """Returns the appropriate connection string based on the subscription name and connection type."""
@@ -182,12 +199,10 @@ class DBConnection(IDBConnection):
 
         if connection_type == "pms":
             return self.pms_connection_string_with_subscription(subscription_name)
-        elif subscription_name == "pms":
+        elif subscription_name == "pms": 
             return self.pms_connection_string()
         else:
             return self.connection_string(subscription_name)
-        
-    from datetime import datetime
 
     def get_expiring_connections(self, key: str) -> str:
         """Returns an expiring connection string if it hasn't expired, otherwise removes it."""
@@ -215,7 +230,7 @@ class DBConnection(IDBConnection):
 
     def is_db_encrypted(self, subscription_name: str) -> bool:
         """Checks if the database for a given subscription name is encrypted."""
-        return subscription_name.strip().lower() in self._cnc_encrypted_dbs
+        return False
     
     def connection_string(self, subscription_name: str) -> str:
         """Retrieves or generates a connection string for the given subscription name."""
@@ -223,24 +238,37 @@ class DBConnection(IDBConnection):
         
         # Check if the connection string is already stored in the dictionary
         if subscription_name in self._objcnc_dictionary_connection:
+            
+            conn_str = self._objcnc_dictionary_connection[subscription_name]
+            print("string found for hashmap:", conn_str)
+            
             return self._objcnc_dictionary_connection[subscription_name]
         
         # Check if the database exists
         if self.check_db(subscription_name):
+            
+            print("Changing DB name")
             if subscription_name in ["pushnotification", "pms"]:
                 str_con = self.base_connection_string(subscription_name).replace("x", subscription_name)
             else:
                 str_con = self.base_connection_string(subscription_name).replace("ELCM_CommonCore", f"ELCM_{subscription_name}")
+                print("Final String:", str_con)
 
             # Ensure thread safety when updating the dictionary
             with self._lock:
                 if subscription_name not in self._objcnc_dictionary_connection:
                     try:
+                        
+                        print("Adding in Hashmap")
+                        
                         self._objcnc_dictionary_connection[subscription_name] = str_con
                         self.add_subscription_to_hash_table(subscription_name)
+                        
+                        print("Added in Hashmap")
                     except Exception as ex:
                         print(f"Error adding connection string to dictionary: {ex}")
 
+            print("Final String:", str_con)
             return str_con
 
         else:

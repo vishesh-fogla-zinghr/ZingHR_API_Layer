@@ -2,8 +2,7 @@ from pydiator_core.interfaces import BaseRequest
 from zinghr_backend.app.MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails import ResponseModel
 from pydantic import BaseModel
 
-
-class LoginCommand(BaseModel, BaseRequest):
+class LoginCommand(BaseModel):
     """Command to handle user login"""
     
     subscription_name: str
@@ -15,5 +14,5 @@ class LoginCommand(BaseModel, BaseRequest):
     longitude: str
     source: str
     user_type: str = "E"
-    application_version: str | None = None  # Optional field
+    application_version: str | None = None  # Optional field    
     formatted_address: str | None = None  # Optional field

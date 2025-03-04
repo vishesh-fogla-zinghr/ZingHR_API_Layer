@@ -1,10 +1,10 @@
 # zinghr_backend/app/Containers/container.py
 from dependency_injector import containers, providers
-from zinghr_backend.app.DAL.dbconnection import DBConnection
-from zinghr_backend.app.Common.AES.EncryptDecryptValue import EncryptDecryptValue
-from zinghr_backend.app.DAL.dal import DAL
-from zinghr_backend.app.MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand
-from zinghr_backend.app.MicroServices.ZingAuth.Application.AppLogics.AuthToken.Handlers.LoginHandler import LoginHandler
+from DAL.dbconnection import DBConnection
+from Common.AES.EncryptDecryptValue import EncryptDecryptValue
+from DAL.dal import DAL
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Handlers.LoginHandler import LoginHandler
 
 class CustomMediator:
     def __init__(self, container):

@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, Optional, Any
 from dataclasses import dataclass
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ class WorkFlowGroupDetail:
     description: str = ""  # Default empty string
     menu_group: int = 0  # Assuming default value is 0
 
-@dataclass
-class ResponseModel(BaseModel, Generic[T]):
-    data: T
+class ResponseModel(BaseModel):
+    code: int
+    message: Optional[str] = None
+    data: Optional[Any] = None

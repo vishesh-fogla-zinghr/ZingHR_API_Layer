@@ -6,3 +6,5 @@ python-dotenv
 psycopg2-binary
 pyodbc
 pycryptodome
+aioodbc
+depedency_injector

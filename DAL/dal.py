@@ -1,7 +1,7 @@
 # zinghr_backend/app/Common/Persistence/dalv2.py
 from typing import Optional
 import aioodbc
-from zinghr_backend.app.DAL.dbconnection import DBConnection
+from DAL.dbconnection import DBConnection
 
 class DAL:
     """Data Access Layer for retrieving SQL connections asynchronously."""

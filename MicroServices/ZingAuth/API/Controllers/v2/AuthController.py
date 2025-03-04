@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Any
-from zinghr_backend.app.MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand  # Import command classes
-from zinghr_backend.app.Containers.container.AppContainer import mediator
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand  # Import command classes
+from Containers.container.AppContainer import mediator
+from MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails import ResponseModel
 
 router = APIRouter()
 
@@ -13,11 +14,31 @@ class AuthController():
         self.mediator = mediator_instance
 
     async def login(self, command: LoginCommand):
-        """Handles user login"""
-        response = await self.mediator.send(command)
-        return response
+        """
+        Handles user login
+        
+        This endpoint authenticates a user based on their credentials and subscription.
+        
+        Returns:
+            ResponseModel: Contains authentication token and user information if successful
+        """
+        try:
+            response = await self.mediator.send(command)
+            return response
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Login failed: {str(e)}"
+            )
 
 # Create an instance of the controller
 auth_controller = AuthController(mediator)
 # Add route using the controller method
-router.add_api_route("/login", auth_controller.login, methods=["POST"])
+router.add_api_route(
+    "/login", 
+    auth_controller.login, 
+    methods=["POST"],
+    response_model=ResponseModel,
+    summary="User Login",
+    description="Authenticate a user and get an auth token"
+)

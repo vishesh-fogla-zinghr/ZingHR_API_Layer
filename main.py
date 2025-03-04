@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from zinghr_backend.app.MicroServices.ZingAuth.API.Controllers.v2.AuthController import router
-from zinghr_backend.app.Containers.container.AppContainer import mediator
+from MicroServices.ZingAuth.API.Controllers.v2.AuthController import router
+from Containers.container.AppContainer import mediator
 from dotenv import load_dotenv
 import os
 

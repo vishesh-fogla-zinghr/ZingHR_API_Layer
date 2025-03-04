@@ -1,6 +1,6 @@
 from fastapi import Depends
 from mediatr import Mediator
-from zinghr_backend.app.Containers.pydiator import setup_pydiator
+from Containers.copydiator import setup_pydiator
 from dependency_injector.wiring import inject
 
 def get_mediator() -> Mediator:

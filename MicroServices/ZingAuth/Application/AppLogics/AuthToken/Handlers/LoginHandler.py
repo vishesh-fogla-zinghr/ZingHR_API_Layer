@@ -1,15 +1,22 @@
 import uuid
-from zinghr_backend.app.MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand
-from zinghr_backend.app.MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails import ResponseModel
-from zinghr_backend.app.DAL.dal import DAL
-from zinghr_backend.app.Common.AES.EncryptDecryptValue import EncryptDecryptValue
+from pydantic import BaseModel
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand
+from MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails import ResponseModel
+from DAL.dal import DAL
+from Common.AES.EncryptDecryptValue import EncryptDecryptValue
 from fastapi import Depends
-from diator.requests import RequestHandler 
 
 import asyncio
 import json
 
-class LoginHandler(RequestHandler[LoginCommand, ResponseModel]):
+class QueryParameters(BaseModel):
+    DatabaseName: str
+    EmpCode: str
+    Password: str
+    Token: str
+
+
+class LoginHandler():
     """Handler for processing login command"""
     
     def __init__(self, _connection: DAL, encryptor: EncryptDecryptValue):
@@ -20,48 +27,61 @@ class LoginHandler(RequestHandler[LoginCommand, ResponseModel]):
     async def handle(self, request: LoginCommand):
         print("reached here - finding database")
         try: 
+            # Get the connection
             connection = await self.db_connection.get_connection(request.subscription_name)
-            print(connection)
-        except Exception as e:
-            print(e)        
-       
-        async with connection.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await conn.execute(f"USE elcm_{request.subscription_name}")
+            print("Connection established")
+            
+            # Generate a unique token for this session
+            token = str(uuid.uuid4())
+            print(token)
+            
+            # Encrypt the password
+            encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
+            
+            print("Password: ", encrypted_password)
+            
+            # Create a cursor and execute the stored procedure
+            async with connection.cursor() as cursor:
+                # Set the database context
+                db_name = f"elcm_{request.subscription_name.lower()}"
+                await cursor.execute(f"USE {db_name}")
                 
-                token = str(uuid.uuid4())
+                params = QueryParameters(DatabaseName=request.subscription_name, EmpCode=request.emp_code, Password=encrypted_password, Token=token)
                 
-                encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
-
-                query_params = {
-                    "SubscriptionName": request.subscription_name,
-                    "EmpCode": request.emp_code,
-                    "Password": encrypted_password,
-                    "IpAddress": "172.16.28.4",  # Placeholder for request IP
-                    "ComputerName": "172.16.28.4",  # Placeholder for hostname
-                    "MacAddress": request.mac_address if request.mac_address else "NOMAC",
-                    "SessionId": request.session_id,
-                    "Guid": token,
-                    "Latitude": request.latitude,
-                    "Longitude": request.longitude,
-                    "Source": request.source,
-                    "UserType": request.user_type,
-                    "DeviceId": "Mozilla/5.0",  # Placeholder for user-agent
-                    "AppVersion": request.application_version or "1.0.0",
-                    "Location": request.formatted_address,
-                }
+                # Execute the stored procedure
+                query = """EXEC [Authentication].[Login] @SubscriptionName=?, @Empcode=?, @Password=?, @Guid=?"""
                 
-                query = """EXEC [Authentication].[Login] ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"""
-                        
-                await cursor.execute(query, query_params)
+                print("Query for authentication...............................................")
+                print(query, (params.DatabaseName, params.EmpCode, params.Password, params.Token))
+                
+                await cursor.execute(query, (params.DatabaseName, params.EmpCode, params.Password, params.Token))
+                
+                # Fetch the result
                 result = await cursor.fetchone()
                 
-                if result and result["Status"].lower() == "success":
+                # Check if login was successful
+                if result and result.Status.lower() == "success":
                     return ResponseModel(
                         code=1,
+                        message="Login successful",
                         data={
-                                "AuthToken": token,
+                            "AuthToken": token,
+                            "UserInfo": {
+                                "EmpCode": request.emp_code,
+                                "SubscriptionName": request.subscription_name
                             }
-                        )
-
-                return ResponseModel(code=0, message="Login failed")
+                        }
+                    )
+                
+                # Return failure response
+                return ResponseModel(
+                    code=0, 
+                    message="Login failed. Invalid credentials or user not found."
+                )
+                
+        except Exception as e:
+            print(f"Login error: {e}")
+            return ResponseModel(
+                code=-1,
+                message=f"An error occurred during login: {str(e)}"
+            )

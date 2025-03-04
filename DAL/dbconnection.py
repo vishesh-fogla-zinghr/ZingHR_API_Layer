@@ -105,12 +105,10 @@ class DBConnection(IDBConnection):
         try:
             with pyodbc.connect(connection_string) as conn:
                 cursor = conn.cursor()
-                # query = "{CALL [dbo].[Common_SP_Login] (?, ?)}", (query_params.DatabaseName, query_params.TransType)
-                # print(query)
                 
-                query = f"EXEC [dbo].[Common_SP_Login] @DatabaseName=elcm_qadb, @TransType=CheckDB"
+                query = "EXEC [dbo].[Common_SP_Login] @DatabaseName=?, @TransType=?"
                 
-                cursor.execute(query)
+                cursor.execute(query, (query_params.DatabaseName, query_params.TransType))
                 result = cursor.fetchone()
                 
                 print("Getting result", result)
@@ -255,18 +253,18 @@ class DBConnection(IDBConnection):
                 print("Final String:", str_con)
 
             # Ensure thread safety when updating the dictionary
-            with self._lock:
-                if subscription_name not in self._objcnc_dictionary_connection:
-                    try:
+            # with self._lock:
+            #     if subscription_name not in self._objcnc_dictionary_connection:
+            #         try:
                         
-                        print("Adding in Hashmap")
+            #             print("Adding in Hashmap")
                         
-                        self._objcnc_dictionary_connection[subscription_name] = str_con
-                        self.add_subscription_to_hash_table(subscription_name)
+            #             self._objcnc_dictionary_connection[subscription_name] = str_con
+            #             self.add_subscription_to_hash_table(subscription_name)
                         
-                        print("Added in Hashmap")
-                    except Exception as ex:
-                        print(f"Error adding connection string to dictionary: {ex}")
+            #             print("Added in Hashmap")
+            #         except Exception as ex:
+            #             print(f"Error adding connection string to dictionary: {ex}")
 
             print("Final String:", str_con)
             return str_con

@@ -7,6 +7,10 @@ from typing import Optional
 from .DBModel import DBModel
 from .DBModel import DbConnectionString
 from datetime import datetime
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker, Session
+from ORM.models import DbDetails, PMSDbDetails, SysDatabase
+from urllib.parse import quote_plus
 
 
 class QueryParameters(BaseModel):
@@ -18,6 +22,22 @@ class DBConnection(IDBConnection):
     _cnc_encrypted_dbs = {}
     _objcnc_dictionary_connection = {}
     _lock = threading.Lock() 
+    
+    
+    def __init__(self):
+        # Create base engine for ELCM_CommonCore
+        try:
+            conn_str = self.base_connection_string("default")
+            print(f"Initializing base engine with connection string: {conn_str}")
+            self.base_engine = create_engine(conn_str, echo=True)  # Enable SQL logging
+            self.SessionLocal = sessionmaker(bind=self.base_engine)
+            # Test the connection
+            with self.SessionLocal() as session:
+                session.execute(text("SELECT 1"))
+                print("Successfully connected to ELCM_CommonCore")
+        except Exception as e:
+            print(f"Error initializing base engine: {str(e)}")
+            raise  
 
     # def pms_connection_string(self, identity_service) -> str:
     #     """Retrieve the PMS connection string using the identity's subscription name."""
@@ -38,24 +58,55 @@ class DBConnection(IDBConnection):
 
 
     def base_connection_string(self, subscription_name: str) -> str:
-        """Generate a SQL Server connection string based on environment variables and subscription name."""
+        """Generate a SQLAlchemy compatible connection URL."""
+
         subscription_name = subscription_name.lower().strip()
 
         hostname = os.getenv("SQLSERVER_HOST")
         password = os.getenv("PASSWORD")
         database = os.getenv("DATABASE")
         user = os.getenv("SQLUSER")
-        driver = os.getenv("MSSQL_DRIVER")
+        driver = os.getenv("MSSQL_DRIVER", "ODBC Driver 17 for SQL Server").strip()
+        
+        print(f"Environment variables:")
+        print(f"SQLSERVER_HOST: {hostname}")
+        print(f"DATABASE: {database}")
+        print(f"SQLUSER: {user}")
+        print(f"MSSQL_DRIVER: {driver}")
+        print(f"PASSWORD: {'*' * len(password)}")
 
-        connection_string = f"Driver={driver};Server={hostname};DATABASE={database};UID={user};PWD={password};"
-        print("Got String: " , connection_string)
+        # Check if any required values are missing
+        if not all([hostname, password, database, user]):
+            missing = []
+            if not hostname: missing.append("SQLSERVER_HOST")
+            if not password: missing.append("PASSWORD")
+            if not database: missing.append("DATABASE")
+            if not user: missing.append("SQLUSER")
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+
+        # Format for SQLAlchemy with explicit port and quoted driver
+        encoded_password = quote_plus(password)
+        encoded_user = quote_plus(user)
+        quoted_driver = quote_plus(driver)
+
+        connection_string = (
+            f"mssql+pyodbc://{encoded_user}:{encoded_password}@{hostname}/{database}?"
+            f"driver={quoted_driver}&"
+            f"TrustServerCertificate=yes&"
+            f"Encrypt=yes&"
+            f"Connection+Timeout=30"
+        )
+        
+        # Print the connection string (mask password)
+        masked_conn_string = connection_string.replace(encoded_password, "*" * len(encoded_password))
+        print(f"Generated connection string: {masked_conn_string}")
 
         return connection_string
 
     def add_subscription_to_hash_table(self, subscription_name: str):
         """Adds a subscription to the hash table if not already present."""
         try:
-            subscription_name = subscription_name.strip().lower()\
+            subscription_name = subscription_name.strip().lower()
                 
             print("Database to add:", subscription_name)
                 
@@ -83,41 +134,45 @@ class DBConnection(IDBConnection):
     def check_db(self, subscription_name: str) -> bool:
         """Checks the database for a given subscription name."""
 
-        # Format the subscription name
-        subname = subscription_name.lower().strip()
-        if subname == "pushnotification" or subname == "pms":
-            subname = subname
-        else:
-            subname = f"elcm_{subscription_name}"
-
-        # Prepare query parameters (similar to DynamicParameters in C#)
-        query_params = QueryParameters(DatabaseName=subname, TransType="CheckDB")
-
-        # Create the connection string using the base function
-        connection_string = self.base_connection_string(subscription_name)
-        
-        print("ELCM_Commoncore str - :" , connection_string)
-        print(query_params.DatabaseName)
-        print(query_params.TransType)
-
-
-        # Execute the query and check the result
         try:
-            with pyodbc.connect(connection_string) as conn:
-                cursor = conn.cursor()
+            # Format the subscription name
+            subname = subscription_name.lower().strip()
+            if subname == "pushnotification" or subname == "pms":
+                subname = subname
+            else:
+                subname = f"elcm_{subscription_name}"
                 
-                query = "EXEC [dbo].[Common_SP_Login] @DatabaseName=?, @TransType=?"
-                
-                cursor.execute(query, (query_params.DatabaseName, query_params.TransType))
-                result = cursor.fetchone()
-                
-                print("Getting result", result)
+            print(f"Checking database: {subname}")
+            
+             # Create a new session for this check
+            session = self.SessionLocal()
+            try:
+                # First test if we can connect at all
+                session.execute(text("SELECT 1")).first()
+                print("Basic connection test successful")
 
-                # If the result is greater than 0, return True
-                return result[0] > 0 if result else False
+                # Now try the actual database check
+                db_count = (
+                    session.query(SysDatabase)
+                    .filter(
+                        SysDatabase.name == subname,
+                        SysDatabase.name != 'ELCM_KTKBANK'
+                    )
+                    .count()
+                )
 
+                print(f"CheckDB result for {subname}: {db_count}")
+                if db_count > 0: 
+                    return True
+            
+            except Exception as e:
+                print(f"Error in check_db execution: {str(e)}")
+                return False
+            finally:
+                session.close()
+                
         except Exception as e:
-            print(f"Error occurred: {e}")
+            print(f"Error in check_db: {str(e)}")
             return False
         
     async def get_connection_string_from_db(self, subscription_name: str, is_pms: bool = False) -> str:
@@ -200,6 +255,7 @@ class DBConnection(IDBConnection):
         elif subscription_name == "pms": 
             return self.pms_connection_string()
         else:
+            print("Invoking Connection String --------------")
             return self.connection_string(subscription_name)
 
     def get_expiring_connections(self, key: str) -> str:
@@ -276,7 +332,7 @@ class DBConnection(IDBConnection):
             with self._lock:
                 try:
                     self._objcnc_dictionary_connection[subscription_name] = connection_string
-                    self.add_subscription_to_hash_table(subscription_name)
+                    # self.add_subscription_to_hash_table(subscription_name)
                 except Exception as ex:
                     print(f"Error adding connection string from DB: {ex}")
 

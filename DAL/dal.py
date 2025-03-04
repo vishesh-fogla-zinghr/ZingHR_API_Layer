@@ -1,7 +1,8 @@
 # zinghr_backend/app/Common/Persistence/dalv2.py
 from typing import Optional
-import aioodbc
 from DAL.dbconnection import DBConnection
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 
 class DAL:
     """Data Access Layer for retrieving SQL connections asynchronously."""
@@ -11,7 +12,20 @@ class DAL:
         self._connection = connection
         # self._identity = identity
 
-    async def get_connection(self, subscription_name: Optional[str] = None, connection_type: str = "") -> aioodbc.Connection:
+
+    async def get_connection(self, subscription_name: Optional[str] = None, connection_type: str = "") -> Engine:
+        
+        """
+        Get a SQLAlchemy engine for the specified subscription.
+        
+        Args:
+            subscription_name: Optional subscription name
+            connection_type: Type of connection (e.g., "pms")
+            
+        Returns:
+            SQLAlchemy Engine instance
+        """
+        
         
         print("Getting Connection ............")
         # Normalize subscription_name to lowercase or None
@@ -24,14 +38,15 @@ class DAL:
             conn_string = self._connection.get_connection(subscription_name, connection_type)
 
         # Create and open the connection asynchronously
-        conn = await aioodbc.connect(dsn=conn_string)
+        engine = create_engine(conn_string)
+        return engine
         
         # Change database if no connection_type is specified (mimics C# behavior)
         # if not connection_type:
         #     db_name = self._connection_string(subscription_name, connection_type)
         #     await conn.execute(f"USE {db_name}")
         
-        return conn
+        # return conn
 
     def _connection_string(self, subscription_name: Optional[str], connection_type: str) -> str:
         """

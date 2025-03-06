@@ -1,8 +1,12 @@
 # zinghr_backend/app/Common/Persistence/dalv2.py
 from typing import Optional
 from DAL.dbconnection import DBConnection
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from typing import Optional, TypeVar, Type
+from sqlalchemy.orm import Session
+
+T = TypeVar('T')
 
 class DAL:
     """Data Access Layer for retrieving SQL connections asynchronously."""
@@ -68,3 +72,44 @@ class DAL:
             else:
                 return f"elcm_{subscription_name}"  # Default ELCM database naming
         return self._connection.base_connection_string("default")  # Fallback default
+    
+    async def get_data(self, 
+                      query: str, 
+                      model_class: Type[T], 
+                      subscription_name: str = "", 
+                      parameters: dict = None, 
+                      timeout: int = 60, 
+                      connection_type: str = "") -> Optional[T]:
+        """
+        Execute a query and return the first result mapped to the specified model.
+        
+        Args:
+            query: The query or stored procedure name
+            model_class: The Pydantic model class to map results to
+            subscription_name: Optional subscription name
+            parameters: Optional parameters for the query
+            timeout: Query timeout in seconds
+            connection_type: Type of connection
+            
+        Returns:
+            Instance of model_class or None if no results
+        """
+        engine = await self.get_connection(subscription_name, connection_type)
+        
+        try:
+            with Session(engine) as session:
+                # Execute the query with parameters
+                result = session.execute(
+                    text(query),
+                    parameters or {},
+                    execution_options={"timeout": timeout}
+                ).first()
+
+                if result:
+                    # Convert SQLAlchemy row to dict and create model instance
+                    row_dict = dict(result._mapping)
+                    return model_class(**row_dict)
+                return None
+                
+        finally:
+            engine.dispose()

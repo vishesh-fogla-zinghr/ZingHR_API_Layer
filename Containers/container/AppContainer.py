@@ -5,25 +5,17 @@ from Common.AES.EncryptDecryptValue import EncryptDecryptValue
 from DAL.dal import DAL
 from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand
 from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Handlers.LoginHandler import LoginHandler
-
-class CustomMediator:
-    def __init__(self, container):
-        self.container = container
-        self.handlers = {LoginCommand: LoginHandler}
-
-    async def send(self, command):
-        handler_class = self.handlers.get(type(command))
-        if not handler_class:
-            raise ValueError(f"No handler for command {type(command)}")
-        handler = self.container.login_handler()
-        return await handler.handle(command)
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.RefreshTokenCommand import RefreshTokenCommand
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Handlers.RefreshTokenCommandHandler import RefreshTokenHandler
+from Containers.mediator import mediator
 
 class AppContainer(containers.DeclarativeContainer):
     db_connection = providers.Singleton(DBConnection)
     encryptor = providers.Singleton(EncryptDecryptValue)
     dal = providers.Singleton(DAL, connection=db_connection)
     login_handler = providers.Factory(LoginHandler, _connection=dal, encryptor=encryptor)
-    mediator = providers.Singleton(CustomMediator, container=providers.Self())
+    refresh_token_handler = providers.Factory(RefreshTokenHandler, _connection=dal)
 
 container = AppContainer()
-mediator = CustomMediator(AppContainer)
+mediator.register_handler(LoginCommand, container.login_handler)
+mediator.register_handler(RefreshTokenCommand, container.refresh_token_handler)

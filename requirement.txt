@@ -8,3 +8,5 @@ pyodbc
 pycryptodome
 aioodbc
 depedency_injector
+dotenv
+jwt

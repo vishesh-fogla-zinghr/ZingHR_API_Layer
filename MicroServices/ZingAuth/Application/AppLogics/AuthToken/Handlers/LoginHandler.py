@@ -5,8 +5,8 @@ from MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails 
 from DAL.dal import DAL
 from Common.AES.EncryptDecryptValue import EncryptDecryptValue
 from fastapi import Depends
-
-
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.RefreshTokenCommand import RefreshTokenCommand, RefreshToken
+from Containers.mediator import mediator
 from datetime import datetime, timedelta
 from sqlalchemy import text, and_, or_
 from sqlalchemy.orm import Session, joinedload
@@ -17,17 +17,13 @@ from ORM.models import (
     GeneralConfiguration,
     EmployeeMaster
 )
-
-
-
-import asyncio
-import json
-
-class QueryParameters(BaseModel):
-    DatabaseName: str
-    EmpCode: str
-    Password: str
-    Token: str
+import jwt
+import os
+    
+class LoginResponse(BaseModel):
+    """Model for login response"""
+    auth_token: str
+    jwt_token: str
 
 
 class LoginHandler():
@@ -89,7 +85,8 @@ class LoginHandler():
                         userid=request.emp_code,
                         type=0,
                         errordesc="Invalid credentials",
-                        token=token
+                        token=token,
+                        login=datetime.utcnow()
                     )
                     session.add(login_history)
                     session.commit()
@@ -109,7 +106,8 @@ class LoginHandler():
                         userid=request.emp_code,
                         type=0,
                         errordesc="Invalid credentials",
-                        token=token
+                        token=token,
+                        login=datetime.utcnow()
                     )
                     session.add(login_history)
                     session.commit()
@@ -130,25 +128,68 @@ class LoginHandler():
                     userid=request.emp_code,
                     type=1,
                     errordesc="SUCCESS",
-                    token=token
+                    token=token,
+                    login=datetime.utcnow(),
+                    signupid=auth_details.employee_master.signupid if auth_details.employee_master else None
                 )
                 session.add(login_history)
+                
+                
+                session.add(login_history)
+                
+                if auth_details.employee_master:
+                    auth_details.employee_master.session_id = token
+                    auth_details.employee_master.token = token
+                
                 session.commit()
-
-                return ResponseModel(
-                    code=1,
-                    message="Login successful",
-                    data={
-                        "AuthToken": token,
-                        "UserInfo": {
-                            "EmpCode": request.emp_code,
-                            "SubscriptionName": request.subscription_name,
-                            "LandingPage": config_dict.get('DefaultAfterLoginPage'),
-                            "LastLogin": datetime.utcnow().isoformat(),
-                            "EmployeeId": auth_details.employee_master.employeeid if auth_details.employee_master else None
-                        }
-                    }
+                
+                refresh_token_cmd = RefreshTokenCommand(
+                    auth_token=token,
+                    subscription_name=request.subscription_name
                 )
+                # Use mediator to send the refresh token command
+                refresh_token_result = await mediator.send(refresh_token_cmd)
+
+                if refresh_token_result.code == 1:
+                    jwt_payload = jwt.decode(
+                        refresh_token_result.data.token,
+                        os.getenv("JWT_SECRET"),
+                        algorithms=["HS256"],
+                        options={
+                            "verify_aud": False,  # Skip audience validation
+                            "verify_exp": False,  # Skip expiration validation for immediate decoding
+                            "verify_iss": False,  # Skip issuer validation
+                            "verify_nbf": False   # Skip "not before" validation
+                        }
+                    )
+
+                    return ResponseModel(
+                        code=1,
+                        message="Login successful",
+                        data={
+                            "auth_token": token,
+                            "jwt_token": refresh_token_result.data.token,
+                            "session_id": login_history.sessionid,
+                            **jwt_payload  # Include all JWT payload fields in the response
+                        }
+                    )
+                else:
+                    return refresh_token_result
+
+                # return ResponseModel(
+                #     code=1,
+                #     message="Login successful",
+                #     data={
+                #         "AuthToken": token,
+                #         "UserInfo": {
+                #             "EmpCode": request.emp_code,
+                #             "SubscriptionName": request.subscription_name,
+                #             "LandingPage": config_dict.get('DefaultAfterLoginPage'),
+                #             "LastLogin": datetime.utcnow().isoformat(),
+                #             "EmployeeId": auth_details.employee_master.employeeid if auth_details.employee_master else None
+                #         }
+                #     }
+                # )
 
             finally:
                 session.close()

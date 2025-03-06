@@ -10,10 +10,10 @@ from ORM.models import (
     RoleMaster,
     ReqRecEmployeeDetails,
     ReqRecEmployeeFinDetails,
-    PersonalDetails,
-    PersonalContactDetails,
-    BloodGroupMaster,
-    GeneralConfiguration
+    GeneralConfiguration,
+    EmployeeAttributeDetails,
+    AttributeTypeUnitMaster,
+    AttributeTypeMaster
 )
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select
@@ -125,6 +125,31 @@ class RefreshTokenHandler():
                     )
                     .all()
                 )
+                
+                employee_attributes = (
+                    session.query(
+                        AttributeTypeMaster.attribute_type_code,
+                        AttributeTypeUnitMaster.attribute_type_unit_description
+                    )
+                    .join(EmployeeAttributeDetails, 
+                          EmployeeAttributeDetails.attribute_type_id == AttributeTypeMaster.attribute_type_id)
+                    .join(AttributeTypeUnitMaster, 
+                          EmployeeAttributeDetails.attribute_type_unit_id == AttributeTypeUnitMaster.attribute_type_unit_id)
+                    .filter(
+                        EmployeeAttributeDetails.employee_code == employee.employeecode,
+                        EmployeeAttributeDetails.to_date.is_(None),
+                        AttributeTypeUnitMaster.applicable == True,
+                        AttributeTypeMaster.applicable == True
+                    )
+                    .all()
+                )
+
+                # Convert attributes to dictionary
+                attributes_dict = {
+                    self.safe_str(attr.attribute_type_code): self.safe_str(attr.attribute_type_unit_description)
+                    for attr in employee_attributes
+                }
+                
 
                 # Generate claims for JWT token
                 claims = {
@@ -163,11 +188,13 @@ class RefreshTokenHandler():
                     "reporting_manager_mobile": self.safe_str(reporting_manager.ed_mobile if reporting_manager else ""),
                     "reporting_manager_photo": self.safe_str(reporting_manager.ed_employee_photo if reporting_manager else ""),
                     # Standard JWT claims
+                    "attributes": attributes_dict,
                     "iss": "zinghr_auth",
                     "aud": "zinghr_api",
                     "exp": int(datetime.utcnow().timestamp() + 86400),  # 24 hours from now
                     "nbf": int(datetime.utcnow().timestamp()),
                     "iat": int(datetime.utcnow().timestamp())
+                    
                 }
 
                 # Sign the JWT token

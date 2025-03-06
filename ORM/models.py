@@ -233,3 +233,47 @@ class BloodGroupMaster(Base):
 
     blood_group_id = Column('BloodGroupID', Integer, primary_key=True)
     code = Column('Code', String(10))
+    
+class AttributeTypeUnitMaster(Base):
+    __tablename__ = 'AttributeTypeUnitMaster'
+    __table_args__ = {'schema': 'dbo'}
+
+    attribute_type_unit_id = Column('AttributeTypeUnitID', Integer, primary_key=True)
+    attribute_type_unit_description = Column('AttributeTypeUnitDescription', String(100))
+    attribute_type_unit_code = Column('AttributeTypeUnitCode', String(50))
+    applicable = Column('Applicable', Boolean, default=True)
+
+class AttributeTypeMaster(Base):
+    __tablename__ = 'AttributeTypeMaster'
+    __table_args__ = {'schema': 'dbo'}
+
+    attribute_type_id = Column('AttributeTypeID', Integer, primary_key=True)
+    attribute_type_description = Column('AttributeTypeDescription', String(100))
+    attribute_type_code = Column('AttributeTypeCode', String(50))
+    applicable = Column('Applicable', Boolean, default=True)
+
+class EmployeeAttributeDetails(Base):
+    __tablename__ = 'EmployeeAttributeDetails'
+    __table_args__ = {'schema': 'dbo'}
+
+    id = Column('ID', Integer, primary_key=True)
+    employee_code = Column('EmployeeCode', String(50))
+    attribute_type_id = Column('AttributeTypeID', Integer, ForeignKey('ED.AttributeTypeMaster.AttributeTypeID'))
+    attribute_type_unit_id = Column('AttributeTypeUnitID', Integer, ForeignKey('ED.AttributeTypeUnitMaster.AttributeTypeUnitID'))
+    from_date = Column('FromDate', DateTime)
+    to_date = Column('ToDate', DateTime, nullable=True)
+
+    # Add relationships
+    attribute_type = relationship('AttributeTypeMaster')
+    attribute_unit = relationship('AttributeTypeUnitMaster') 
+    
+    attribute_type = relationship(
+        'AttributeTypeMaster',
+        primaryjoin="and_(EmployeeAttributeDetails.attribute_type_id == foreign(AttributeTypeMaster.attribute_type_id))",
+        uselist=False
+    )
+    attribute_unit = relationship(
+        'AttributeTypeUnitMaster',
+        primaryjoin="and_(EmployeeAttributeDetails.attribute_type_unit_id == foreign(AttributeTypeUnitMaster.attribute_type_unit_id))",
+        uselist=False
+    ) 

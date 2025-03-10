@@ -62,6 +62,8 @@ class AuthSoxDetails(Base):
 
 class LoginHistory(Base):
     __tablename__ = 'LoginHistory'
+    __table_args__ = {'schema': 'dbo'}
+
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     sessionid = Column(String(38))

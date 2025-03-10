@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, status, Security
+from fastapi import APIRouter, Depends, HTTPException, status, Security, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand  # Import command classes
 from Containers.container.AppContainer import mediator
@@ -23,11 +22,11 @@ async def validate_token(credentials: HTTPAuthorizationCredentials = Security(se
             algorithms=["HS256"],
             options={
                 "verify_signature": True,
-                "verify_exp": True,
-                "verify_nbf": True,
-                "verify_iss": True,
-                "verify_aud": True,
-                "require_exp": True,
+                "verify_exp": False,
+                "verify_nbf": False,
+                "verify_iss": False,
+                "verify_aud": False,
+                "require_exp": False,
             }
         )
         return payload
@@ -50,7 +49,7 @@ class AuthController():
         """Initialize the controller with the mediator instance."""
         self.mediator = mediator_instance
 
-    async def login(self, command: LoginCommand):
+    async def login(self, command: LoginCommand, response: Response):
         """
         Handles user login
         
@@ -60,8 +59,18 @@ class AuthController():
             ResponseModel: Contains authentication token and user information if successful
         """
         try:
-            response = await self.mediator.send(command)
-            return response
+            result = await self.mediator.send(command)
+            
+            if result.code == 1 and result.data and "response" in result.data:
+                # Get the response object from the result
+                login_response = result.data.pop("response")
+                
+                # Copy cookies from login response to the actual response
+                for cookie in login_response.raw_headers:
+                    if cookie[0].decode().lower() == 'set-cookie':
+                        response.raw_headers.append(cookie)
+            
+            return result
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -1,0 +1,42 @@
+name: ZingHR_API_Layer
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SQLSERVER_HOST=${SQLSERVER_HOST}
+      - DATABASE=${DATABASE}
+      - SQLUSER=${SQLUSER}
+      - PASSWORD=${PASSWORD}
+      - MSSQL_DRIVER=${MSSQL_DRIVER}
+      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_BASE_PATH=${API_BASE_PATH}
+
+    depends_on:
+      - redis
+    volumes:
+      - .:/app
+    networks:
+      - app-network
+
+  redis:
+    image: redis:6.2-alpine
+    command: redis-server --appendonly no --save ""
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  redis_data: 
+    driver: local 

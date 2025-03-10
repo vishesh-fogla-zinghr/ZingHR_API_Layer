@@ -1,0 +1,132 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Logs
+*.log
+logs/
+log/
+
+# Cache
+.cache/
+.pytest_cache/
+
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Redis
+redis_data/
+
+# Project specific
+.git/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.env
+venv/
+*.log
+
+# Virtual Environment
+.env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Local development
+*.db
+*.sqlite3
+.DS_Store
+node_modules/
+coverage/
+
+# Documentation
+docs/
+*.md
+README*
+
+# Test files
+test/
+tests/
+Testing/
+__tests__/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local configuration
+*.local
+local_settings.py
+
+# Debug files
+.debug/
+debug/
+*.debug
+
+# Don't ignore
+!requirements.txt
+!models.py
+!main.py
+!database.py
+!redis_service.py 

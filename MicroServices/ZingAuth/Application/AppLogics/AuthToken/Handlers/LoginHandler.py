@@ -1,12 +1,14 @@
 import uuid
 from pydantic import BaseModel
+from typing import Optional, Dict
 from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand
 from MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails import ResponseModel
 from DAL.dal import DAL
 from Common.AES.EncryptDecryptValue import EncryptDecryptValue
-from fastapi import Depends
+from fastapi import Depends, Response
 from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.RefreshTokenCommand import RefreshTokenCommand, RefreshToken
 from Containers.mediator import mediator
+from Common.Redis.redis_service import RedisService
 from datetime import datetime, timedelta
 from sqlalchemy import text, and_, or_
 from sqlalchemy.orm import Session, joinedload
@@ -24,14 +26,16 @@ class LoginResponse(BaseModel):
     """Model for login response"""
     auth_token: str
     jwt_token: str
+    session_id: str
 
 
 class LoginHandler():
     """Handler for processing login command"""
     
-    def __init__(self, _connection: DAL, encryptor: EncryptDecryptValue):
+    def __init__(self, _connection: DAL, encryptor: EncryptDecryptValue, redis_service: RedisService):
         self.db_connection = _connection
         self.encryptor = encryptor
+        self.redis_service = redis_service
         
       
     async def handle(self, request: LoginCommand):
@@ -119,6 +123,21 @@ class LoginHandler():
                     if days_since_pwd_change >= int(config_dict['PASSWORDEXPIRYINDAYS']):
                         return ResponseModel(code=0, message="Password Expired")
 
+                multiple_login_enabled = config_dict.get('MultipleLoginEnableToUser') == '1'
+                existing_sessions = self.redis_service.get_user_sessions(request.emp_code)
+
+                if existing_sessions and not multiple_login_enabled:
+                    # Invalidate existing sessions if kill_previous_session is True
+                    if request.kill_previous_session:
+                        for session_data in existing_sessions:
+                            self.redis_service.invalidate_session(session_data.get('session_id'))
+                    else:
+                        return ResponseModel(
+                            code=0,
+                            message="This user is already logged in from another system",
+                            data={"already_logged_in_user": True}
+                        )
+
                 # Reset fail count and create successful login history using ORM
                 auth_details.sd_failcount = 0
                 
@@ -133,15 +152,25 @@ class LoginHandler():
                     signupid=auth_details.employee_master.signupid if auth_details.employee_master else None
                 )
                 session.add(login_history)
+                session.commit()
                 
-                
-                session.add(login_history)
                 
                 if auth_details.employee_master:
                     auth_details.employee_master.session_id = token
                     auth_details.employee_master.token = token
                 
-                session.commit()
+                user_data = {
+                    "emp_code": request.emp_code,
+                    "subscription": request.subscription_name,
+                    "session_id": token,
+                    "user_type": auth_details.employee_master.usertype if auth_details.employee_master else 'E',
+                 
+                }
+                
+                SESSION_EXPIRY = 900
+                
+                # Store session in Redis with 15-minute expiration
+                self.redis_service.create_session(token, user_data, expiry=SESSION_EXPIRY)
                 
                 refresh_token_cmd = RefreshTokenCommand(
                     auth_token=token,
@@ -151,6 +180,12 @@ class LoginHandler():
                 refresh_token_result = await mediator.send(refresh_token_cmd)
 
                 if refresh_token_result.code == 1:
+                    
+                    self.redis_service.link_token_to_session(
+                        refresh_token_result.data.token,
+                        token
+                    )
+                    
                     jwt_payload = jwt.decode(
                         refresh_token_result.data.token,
                         os.getenv("JWT_SECRET"),
@@ -162,34 +197,47 @@ class LoginHandler():
                             "verify_nbf": False   # Skip "not before" validation
                         }
                     )
+                    
+                    session.commit()
+                    
+                    session_expiry = (datetime.utcnow() + timedelta(seconds=SESSION_EXPIRY)).replace(microsecond=0)
+
+                    response = Response()
+                    response.set_cookie(
+                        key="session_id",
+                        value=token,
+                        max_age=session_expiry,
+                        httponly=True,
+                        secure=True,
+                        samesite="lax"
+                    )
+                    response.set_cookie(
+                        key="jwt_token",
+                        value=refresh_token_result.data.token,
+                        max_age=session_expiry,
+                        httponly=True,
+                        secure=True,
+                        samesite="lax"
+                    )
+                    response.set_cookie(
+                        key="user_id",
+                        value=request.emp_code,
+                        max_age=session_expiry,
+                        httponly=True,
+                        secure=True,
+                        samesite="lax"
+                    )
 
                     return ResponseModel(
                         code=1,
                         message="Login successful",
                         data={
-                            "auth_token": token,
-                            "jwt_token": refresh_token_result.data.token,
-                            "session_id": login_history.sessionid,
-                            **jwt_payload  # Include all JWT payload fields in the response
+                            **jwt_payload,  # Include all JWT payload fields in the response
+                            "response": response
                         }
                     )
                 else:
                     return refresh_token_result
-
-                # return ResponseModel(
-                #     code=1,
-                #     message="Login successful",
-                #     data={
-                #         "AuthToken": token,
-                #         "UserInfo": {
-                #             "EmpCode": request.emp_code,
-                #             "SubscriptionName": request.subscription_name,
-                #             "LandingPage": config_dict.get('DefaultAfterLoginPage'),
-                #             "LastLogin": datetime.utcnow().isoformat(),
-                #             "EmployeeId": auth_details.employee_master.employeeid if auth_details.employee_master else None
-                #         }
-                #     }
-                # )
 
             finally:
                 session.close()
@@ -201,272 +249,3 @@ class LoginHandler():
                 code=-1,
                 message=f"An error occurred during login: {str(e)}"
             )
-        
-        # print("reached here - finding database")
-        # try: 
-        #     # Get the connection
-        #     connection = await self.db_connection.get_connection(request.subscription_name)
-        #     # print("Connection established")
-            
-        #     # # Generate a unique token for this session
-        #     # token = str(uuid.uuid4())
-        #     # print(token)
-            
-        #     # # Encrypt the password
-        #     # encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
-            
-        #     # print("Password: ", encrypted_password)
-            
-        #     # # Create a cursor and execute the stored procedure
-        #     # async with connection.cursor() as cursor:
-        #     #     # Set the database context
-        #     #     db_name = f"elcm_{request.subscription_name.lower()}"
-        #     #     await cursor.execute(f"USE {db_name}")
-                
-        #     #     params = QueryParameters(DatabaseName=request.subscription_name, EmpCode=request.emp_code, Password=encrypted_password, Token=token)
-                
-        #     #     # Execute the stored procedure
-        #     #     query = """EXEC [Authentication].[Login] @SubscriptionName=?, @Empcode=?, @Password=?, @Guid=?"""
-                
-        #     #     print("Query for authentication...............................................")
-        #     #     print(query, (params.DatabaseName, params.EmpCode, params.Password, params.Token))
-                
-        #     #     await cursor.execute(query, (params.DatabaseName, params.EmpCode, params.Password, params.Token))
-                
-        #     #     # Fetch the result
-        #     #     result = await cursor.fetchone()
-                
-        #     #     # Check if login was successful
-        #     #     if result and result.Status.lower() == "success":
-        #     #         return ResponseModel(
-        #     #             code=1,
-        #     #             message="Login successful",
-        #     #             data={
-        #     #                 "AuthToken": token,
-        #     #                 "UserInfo": {
-        #     #                     "EmpCode": request.emp_code,
-        #     #                     "SubscriptionName": request.subscription_name
-        #     #                 }
-        #     #             }
-        #     #         )
-                
-        #     #     # Return failure response
-        #     #     return ResponseModel(
-        #     #         code=0, 
-        #     #         message="Login failed. Invalid credentials or user not found."
-        #     #     )
-            
-            
-            
-        #     session = Session(bind=connection)
-
-        #     try:
-        #         # Set transaction isolation level
-        #         session.execute(text("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"))
-
-        #         # Generate token
-        #         token = str(uuid.uuid4())
-
-        #         # Encrypt password
-        #         encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
-
-        #         # Get all required data in a single query
-        #         result = session.execute(
-        #             text("""
-        #             SELECT 
-        #                 a.sd_userid, a.sd_pwd1, a.sd_sm_statusid, a.sd_failcount, 
-        #                 a.sd_timestamp, a.sd_init,
-        #                 e.employeeid, e.signupid, e.usertype,
-        #                 gc1.value as pwd_expiry_days,
-        #                 gc2.value as multiple_login_enabled,
-        #                 gc3.value as default_landing_page
-        #             FROM AUTH_SOXDETAILS a
-        #             LEFT JOIN ED.EMPLOYEEMASTER e ON e.employeecode = a.sd_userid
-        #             LEFT JOIN ess_genralconfiguration gc1 ON gc1.keyname = 'PASSWORDEXPIRYINDAYS'
-        #             LEFT JOIN ess_genralconfiguration gc2 ON gc2.keyname = 'MultipleLoginEnableToUser'
-        #             LEFT JOIN ess_genralconfiguration gc3 ON gc3.keyname = 'DefaultAfterLoginPage'
-        #             WHERE a.sd_userid = :emp_code
-        #             """),
-        #             {"emp_code": request.emp_code}
-        #         ).first()
-
-        #         if not result:
-        #             # Create failed login history for non-existent user
-        #             login_entry = LoginHistory(
-        #                 sessionid=token,
-        #                 subscription=request.subscription_name,
-        #                 userid=request.emp_code,
-        #                 type=0,
-        #                 errordesc="Invalid credentials",
-        #                 token=token,
-        #                 ipaddress=request.ip_address,
-        #                 computername=request.computer_name,
-        #                 macaddress=request.mac_address,
-        #                 latitude=request.latitude,
-        #                 longitude=request.longitude,
-        #                 location=request.location,
-        #                 source=request.source,
-        #                 appversion=request.app_version,
-        #                 deviceid=request.device_id
-        #             )
-        #             session.add(login_entry)
-        #             session.commit()
-        #             return ResponseModel(code=0, message="Login failed. Invalid credentials.")
-
-        #         # Validate password
-        #         if result.sd_pwd1 != encrypted_password:
-        #             # Update fail count in a single query
-        #             new_fail_count = (result.sd_failcount or 0) + 1
-        #             new_status = 2 if new_fail_count >= 5 else result.sd_sm_statusid
-
-        #             session.execute(
-        #                 text("""
-        #                 UPDATE AUTH_SOXDETAILS 
-        #                 SET sd_failcount = :fail_count, sd_sm_statusid = :status
-        #                 WHERE sd_userid = :emp_code
-        #                 """),
-        #                 {
-        #                     "fail_count": new_fail_count,
-        #                     "status": new_status,
-        #                     "emp_code": request.emp_code
-        #                 }
-        #             )
-
-        #             # Create failed login history
-        #             login_entry = LoginHistory(
-        #                 sessionid=token,
-        #                 subscription=request.subscription_name,
-        #                 userid=request.emp_code,
-        #                 type=0,
-        #                 errordesc="Invalid credentials",
-        #                 token=token,
-        #                 ipaddress=request.ip_address,
-        #                 computername=request.computer_name,
-        #                 macaddress=request.mac_address,
-        #                 latitude=request.latitude,
-        #                 longitude=request.longitude,
-        #                 location=request.location,
-        #                 signupid=result.signupid,
-        #                 source=request.source,
-        #                 appversion=request.app_version,
-        #                 deviceid=request.device_id
-        #             )
-        #             session.add(login_entry)
-        #             session.commit()
-        #             return ResponseModel(code=0, message="Login failed. Invalid credentials.")
-
-        #         # Check password expiry
-        #         if result.pwd_expiry_days and result.sd_timestamp:
-        #             days_since_pwd_change = (datetime.utcnow() - result.sd_timestamp).days
-        #             if days_since_pwd_change >= int(result.pwd_expiry_days):
-        #                 return ResponseModel(code=0, message="Password Expired")
-
-        #         # Check multiple login in a single query
-        #         if not result.multiple_login_enabled or result.multiple_login_enabled != '1':
-        #             active_session = session.execute(
-        #                 text("""
-        #                 SELECT TOP 1 id, sessionid, token 
-        #                 FROM LoginHistory 
-        #                 WHERE userid = :emp_code 
-        #                 AND errordesc = 'SUCCESS' 
-        #                 AND logout IS NULL 
-        #                 AND login > :cutoff_time
-        #                 """),
-        #                 {
-        #                     "emp_code": request.emp_code,
-        #                     "cutoff_time": datetime.utcnow() - timedelta(minutes=30)
-        #                 }
-        #             ).first()
-
-        #             if active_session and not request.kill_previous_session:
-        #                 return ResponseModel(code=0, message="This user is already logged in from another system")
-        #             elif active_session:
-        #                 # Log out previous session
-        #                 session.execute(
-        #                     text("""
-        #                     UPDATE LoginHistory 
-        #                     SET logout = :logout_time, errordesc = 'Log Out'
-        #                     WHERE id = :session_id
-        #                     """),
-        #                     {
-        #                         "logout_time": datetime.utcnow(),
-        #                         "session_id": active_session.id
-        #                     }
-        #                 )
-
-        #         # Get screen mapping in a single query
-        #         screen_mapping = session.execute(
-        #             text("""
-        #             SELECT pagename, isnewdirectory, alertmessage
-        #             FROM [Authentication].EmployeeScreenMapping
-        #             WHERE employeecode = :emp_code
-        #             AND applicable = 1
-        #             AND fromdate <= :current_time
-        #             AND todate >= :current_time
-        #             """),
-        #             {
-        #                 "emp_code": request.emp_code,
-        #                 "current_time": datetime.utcnow()
-        #             }
-        #         ).first()
-
-        #         # Reset fail count and create successful login history in a single transaction
-        #         session.execute(
-        #             text("""
-        #             UPDATE AUTH_SOXDETAILS SET sd_failcount = 0 WHERE sd_userid = :emp_code;
-                    
-        #             INSERT INTO LoginHistory (
-        #                 sessionid, subscription, userid, type, errordesc, token,
-        #                 ipaddress, computername, macaddress, latitude, longitude,
-        #                 location, signupid, source, appversion, deviceid
-        #             ) VALUES (
-        #                 :sessionid, :subscription, :userid, 1, 'SUCCESS', :token,
-        #                 :ipaddress, :computername, :macaddress, :latitude, :longitude,
-        #                 :location, :signupid, :source, :appversion, :deviceid
-        #             )
-        #             """),
-        #             {
-        #                 "emp_code": request.emp_code,
-        #                 "sessionid": token,
-        #                 "subscription": request.subscription_name,
-        #                 "userid": request.emp_code,
-        #                 "token": token,
-        #                 "ipaddress": request.ip_address,
-        #                 "computername": request.computer_name,
-        #                 "macaddress": request.mac_address,
-        #                 "latitude": request.latitude,
-        #                 "longitude": request.longitude,
-        #                 "location": request.location,
-        #                 "signupid": result.signupid,
-        #                 "source": request.source,
-        #                 "appversion": request.app_version,
-        #                 "deviceid": request.device_id
-        #             }
-        #         )
-        #         session.commit()
-
-        #         return ResponseModel(
-        #             code=1,
-        #             message="Login successful",
-        #             data={
-        #                 "AuthToken": token,
-        #                 "UserInfo": {
-        #                     "EmpCode": request.emp_code,
-        #                     "SubscriptionName": request.subscription_name,
-        #                     "LandingPage": screen_mapping.pagename if screen_mapping else result.default_landing_page,
-        #                     "IsNewDirectory": screen_mapping.isnewdirectory if screen_mapping else False,
-        #                     "AlertMessage": screen_mapping.alertmessage if screen_mapping else None,
-        #                     "LastLogin": datetime.utcnow().isoformat()
-        #                 }
-        #             }
-        #         )
-
-        #     finally:
-        #         session.close()
-                
-        # except Exception as e:
-        #     print(f"Login error: {e}")
-        #     return ResponseModel(
-        #         code=-1,
-        #         message=f"An error occurred during login: {str(e)}"
-        #     )

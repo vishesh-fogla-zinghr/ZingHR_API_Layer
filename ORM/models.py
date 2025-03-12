@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, T
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
+from sqlalchemy.sql import func
 
 Base = declarative_base()
 
@@ -279,3 +280,43 @@ class EmployeeAttributeDetails(Base):
         primaryjoin="and_(EmployeeAttributeDetails.attribute_type_unit_id == foreign(AttributeTypeUnitMaster.attribute_type_unit_id))",
         uselist=False
     ) 
+    
+class TestOTP(Base):
+    """Model for ED.testOTP table"""
+    __tablename__ = 'testOTP'
+    __table_args__ = {'schema': 'ED'}
+
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    ED_EMPCode = Column(String(50), nullable=False, unique=True)
+    ED_FirstName = Column(String(100), nullable=False)
+    ED_MiddleName = Column(String(100))
+    ED_LastName = Column(String(100))
+    ED_Mobile = Column(String(15), nullable=False, unique=True)
+    CreatedOn = Column(DateTime, server_default=func.now())
+    ModifiedOn = Column(DateTime)
+    IsActive = Column(Boolean, server_default='1')
+
+    def __repr__(self):
+        return f"<TestOTP(ED_EMPCode='{self.ED_EMPCode}', ED_FirstName='{self.ED_FirstName}', ED_Mobile='{self.ED_Mobile}')>"
+    
+class OTPVerification(Base):
+    """Model for storing OTP verification records"""
+    __tablename__ = 'OTPVerification'
+    __table_args__ = {'schema': 'ED'}
+
+    ID = Column(Integer, primary_key=True, autoincrement=True)
+    ED_EMPCode = Column(String(50), ForeignKey('ED.testOTP.ED_EMPCode'), nullable=False)
+    OTP = Column(String(6), nullable=False)
+    ReferenceID = Column(String(36), nullable=False, unique=True)  # UUID
+    ExpiresAt = Column(DateTime, nullable=False)
+    IsVerified = Column(Boolean, server_default='0')
+    AttemptCount = Column(Integer, server_default='0')
+    CreatedOn = Column(DateTime, server_default=func.now())
+    ModifiedOn = Column(DateTime)
+    IsActive = Column(Boolean, server_default='1')
+
+    # Relationship with TestOTP table
+    employee = relationship("TestOTP", backref="otp_verifications")
+
+    def __repr__(self):
+        return f"<OTPVerification(reference_id='{self.ReferenceID}', expires_at='{self.ExpiresAt}', is_verified={self.IsVerified})'>" 

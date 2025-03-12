@@ -2,8 +2,10 @@ from typing import Any
 from pydantic import BaseModel, Field, constr
 from fastapi import APIRouter, Depends, HTTPException, status, Security, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.SendOTPCommand import SendOTPCommand
 from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.LoginCommand import LoginCommand  # Import command classes
 from Containers.container.AppContainer import mediator
+from MicroServices.ZingAuth.Application.AppLogics.AuthToken.Commands.VerifyOTPCommand import VerifyOTPCommand
 from MicroServices.ZingAuth.Application.Integration.Models.WorkFlowGroupDetails import ResponseModel
 import jwt
 import os
@@ -11,20 +13,6 @@ from datetime import datetime
 
 router = APIRouter()
 security = HTTPBearer()
-
-class SendOTPRequest(BaseModel):
-    phone_number: str = Field(..., pattern=r'^\+?1?\d{9,15}$', description="Phone number in international format (E.164)")
-    subscription_name: str = Field(..., description="The subscription name for the tenant")
-
-class SendOTPResponse(BaseModel):
-    reference_id: str = Field(..., description="Reference ID to be used when verifying OTP")
-    expires_in: int = Field(..., description="OTP expiry time in seconds")
-
-class VerifyOTPRequest(BaseModel):
-    phone_number: str = Field(..., pattern=r'^\+?1?\d{9,15}$', description="Phone number in international format (E.164)")
-    otp: str = Field(..., pattern=r'^\d{6}$', description="6-digit OTP code")
-    reference_id: str = Field(..., description="Reference ID received from send-otp endpoint")
-    subscription_name: str = Field(..., description="The subscription name for the tenant")
 
 
 async def validate_token(credentials: HTTPAuthorizationCredentials = Security(security)):
@@ -92,7 +80,7 @@ class AuthController():
                 detail=f"Login failed: {str(e)}"
             )
             
-    async def send_otp(self, request: SendOTPRequest):
+    async def send_otp(self, command: SendOTPCommand):
         """
         Send OTP to phone number
         
@@ -102,13 +90,24 @@ class AuthController():
         Returns:
             SendOTPResponse: Contains reference ID and expiry time
         """
-        # Placeholder for actual implementation
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="OTP functionality not implemented yet"
-        )
+        try:
+            # Create and send command
+            result = await self.mediator.send(command)
+            
+            if result.code != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=result.message
+                )
+                
+            return result
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to send OTP: {str(e)}"
+            )
 
-    async def verify_otp(self, request: VerifyOTPRequest, response: Response):
+    async def verify_otp(self, command: VerifyOTPCommand, response: Response):
         """
         Verify OTP and login user
         
@@ -118,12 +117,36 @@ class AuthController():
         Returns:
             ResponseModel: Contains authentication token and user information if successful
         """
-        # Placeholder for actual implementation
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="OTP functionality not implemented yet"
-        )
-
+        
+        try:
+            
+            result = await self.mediator.send(command)
+            
+            if result.code != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=result.message
+                )
+            
+            # If result contains response object with cookies, copy them
+            if result.data and "response" in result.data:
+                # Get the response object from the result
+                login_response = result.data.pop("response")
+                
+                # Copy cookies from login response to the actual response
+                for cookie in login_response.raw_headers:
+                    if cookie[0].decode().lower() == 'set-cookie':
+                        response.raw_headers.append(cookie)
+            
+            return result
+        
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to verify OTP: {str(e)}"
+            )
+            
+            
 # Create an instance of the controller
 auth_controller = AuthController(mediator)
 # Add route using the controller method
@@ -140,7 +163,7 @@ router.add_api_route(
     "/send-otp",
     auth_controller.send_otp,
     methods=["POST"],
-    response_model=SendOTPResponse,
+    response_model=ResponseModel,
     summary="Send OTP",
     description="Send a 6-digit OTP to the provided phone number"
 )

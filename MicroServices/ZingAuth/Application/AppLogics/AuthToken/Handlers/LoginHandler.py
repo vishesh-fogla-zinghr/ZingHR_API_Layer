@@ -44,6 +44,8 @@ class LoginHandler():
             # Get database engine
             engine = await self.db_connection.get_connection(request.subscription_name)
             session = Session(bind=engine)
+            
+            print("Connected to DB ---------------------------------------------------------------")
 
             try:
                 # Set transaction isolation level
@@ -52,8 +54,8 @@ class LoginHandler():
                 # Generate token
                 token = str(uuid.uuid4())
 
-                # Encrypt password
-                encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
+                # # Encrypt password
+                # encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
 
                 # Query user details using ORM
                 auth_details = (
@@ -96,32 +98,36 @@ class LoginHandler():
                     session.commit()
                     return ResponseModel(code=0, message="Login failed. Invalid credentials.")
 
-                # Validate password
-                if auth_details.sd_pwd1 != encrypted_password:
-                    # Update fail count using ORM
-                    auth_details.sd_failcount = (auth_details.sd_failcount or 0) + 1
-                    if auth_details.sd_failcount >= 5:
-                        auth_details.sd_sm_statusid = 2
+                if not request.is_otp_login:
+                    # Encrypt password
+                    encrypted_password = self.encryptor.encrypt_js_value(str(request.password))
 
-                    # Create failed login history using ORM
-                    login_history = LoginHistory(
-                        sessionid=token,
-                        subscription=request.subscription_name,
-                        userid=request.emp_code,
-                        type=0,
-                        errordesc="Invalid credentials",
-                        token=token,
-                        login=datetime.utcnow()
-                    )
-                    session.add(login_history)
-                    session.commit()
-                    return ResponseModel(code=0, message="Login failed. Invalid credentials.")
+                    # Validate password
+                    if auth_details.sd_pwd1 != encrypted_password:
+                        # Update fail count using ORM
+                        auth_details.sd_failcount = (auth_details.sd_failcount or 0) + 1
+                        if auth_details.sd_failcount >= 5:
+                            auth_details.sd_sm_statusid = 2
 
-                # Check password expiry
-                if config_dict.get('PASSWORDEXPIRYINDAYS') and auth_details.sd_timestamp:
-                    days_since_pwd_change = (datetime.utcnow() - auth_details.sd_timestamp).days
-                    if days_since_pwd_change >= int(config_dict['PASSWORDEXPIRYINDAYS']):
-                        return ResponseModel(code=0, message="Password Expired")
+                        # Create failed login history using ORM
+                        login_history = LoginHistory(
+                            sessionid=token,
+                            subscription=request.subscription_name,
+                            userid=request.emp_code,
+                            type=0,
+                            errordesc="Invalid credentials",
+                            token=token,
+                            login=datetime.utcnow()
+                        )
+                        session.add(login_history)
+                        session.commit()
+                        return ResponseModel(code=0, message="Login failed. Invalid credentials.")
+
+                    # Check password expiry
+                    if config_dict.get('PASSWORDEXPIRYINDAYS') and auth_details.sd_timestamp:
+                        days_since_pwd_change = (datetime.utcnow() - auth_details.sd_timestamp).days
+                        if days_since_pwd_change >= int(config_dict['PASSWORDEXPIRYINDAYS']):
+                            return ResponseModel(code=0, message="Password Expired")
 
                 multiple_login_enabled = config_dict.get('MultipleLoginEnableToUser') == '1'
                 existing_sessions = self.redis_service.get_user_sessions(request.emp_code)

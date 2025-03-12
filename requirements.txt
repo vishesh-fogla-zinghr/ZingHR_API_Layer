@@ -10,3 +10,4 @@ aioodbc
 dependency-injector
 dotenv
 PyJWT
+httpx

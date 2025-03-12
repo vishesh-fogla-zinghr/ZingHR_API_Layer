@@ -15,6 +15,10 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - API_BASE_PATH=${API_BASE_PATH}
+      - MSG91_AUTH_KEY=${MSG91_AUTH_KEY}
+      - MSG91_TEMPLATE_ID=${MSG91_TEMPLATE_ID}
+      - MSG91_OTP_EXPIRY=${MSG91_OTP_EXPIRY}
+      - MSG91_API_URL=${MSG91_API_URL}
 
     depends_on:
       - redis
